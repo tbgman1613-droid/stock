@@ -10,9 +10,9 @@ st.set_page_config(
 )
 
 st.title("📈 글로벌 주식 1년 분석")
-st.write("삼성전자, SK하이닉스, 구글, 마이크로소프트, 애플의 최근 1년 주가를 비교합니다.")
+st.caption("삼성전자, SK하이닉스, 구글, 마이크로소프트, 애플 비교")
 
-tickers = {
+stocks = {
     "삼성전자": "005930.KS",
     "SK하이닉스": "000660.KS",
     "구글": "GOOGL",
@@ -26,10 +26,11 @@ def load_data():
 
     result = pd.DataFrame()
 
-    for name, ticker in tickers.items():
+    for name, ticker in stocks.items():
 
         try:
-            stock = yf.download(
+
+            df = yf.download(
                 ticker,
                 period="1y",
                 auto_adjust=True,
@@ -37,173 +38,206 @@ def load_data():
                 threads=False
             )
 
-            if not stock.empty:
-                result[name] = stock["Close"]
+            if not df.empty:
+                result[name] = df["Close"]
 
-        except Exception as e:
-            st.warning(f"{name} 데이터를 불러오지 못했습니다.")
+        except Exception:
+            pass
+
+    result = result.sort_index()
+
+    # 거래일 차이 보정
+    result = result.ffill()
+
+    # 빈 행 제거
+    result = result.dropna(how="all")
 
     return result
 
 
 data = load_data()
 
-# 거래일 차이 보정
-data = data.sort_index()
-data = data.ffill()
-
-# 모두 비어있는 행 제거
-data = data.dropna(how="all")
-
 if data.empty:
     st.error("주가 데이터를 가져오지 못했습니다.")
     st.stop()
 
-# -----------------------
-# 최근 1년 주가
-# -----------------------
+# ------------------------
+# 탭 구성
+# ------------------------
 
-st.subheader("📊 최근 1년 주가")
+tab1, tab2, tab3, tab4 = st.tabs([
+    "📊 원본 주가",
+    "🚀 성과 비교",
+    "🏆 수익률 순위",
+    "⚠️ 변동성"
+])
 
-fig_price = px.line(
-    data,
-    x=data.index,
-    y=data.columns,
-    labels={
-        "value": "주가",
-        "index": "날짜"
-    }
-)
+# =====================================================
+# 탭1 원본 주가
+# =====================================================
 
-fig_price.update_traces(
-    connectgaps=True
-)
+with tab1:
 
-fig_price.update_layout(
-    hovermode="x unified",
-    height=650
-)
+    st.subheader("원본 주가")
 
-st.plotly_chart(
-    fig_price,
-    use_container_width=True
-)
+    selected = st.multiselect(
+        "종목 선택",
+        data.columns,
+        default=list(data.columns)
+    )
 
-# -----------------------
-# 누적 수익률
-# -----------------------
+    fig = px.line(
+        data[selected],
+        x=data.index,
+        y=selected
+    )
 
-returns = (
-    data.div(data.iloc[0])
-    .subtract(1)
-    .multiply(100)
-)
+    fig.update_traces(connectgaps=True)
 
-st.subheader("🚀 누적 수익률 비교 (%)")
+    fig.update_layout(
+        hovermode="x unified",
+        height=650
+    )
 
-fig_return = px.line(
-    returns,
-    x=returns.index,
-    y=returns.columns
-)
+    st.plotly_chart(
+        fig,
+        use_container_width=True
+    )
 
-fig_return.update_traces(
-    connectgaps=True
-)
+# =====================================================
+# 탭2 성과 비교
+# =====================================================
 
-fig_return.update_layout(
-    hovermode="x unified",
-    height=650
-)
+with tab2:
 
-st.plotly_chart(
-    fig_return,
-    use_container_width=True
-)
+    st.subheader("상대 성과 비교")
 
-# -----------------------
-# 성과 순위
-# -----------------------
+    normalized = data.div(data.iloc[0]).mul(100)
 
-final_returns = (
-    returns.iloc[-1]
-    .dropna()
-    .sort_values(ascending=False)
-)
+    fig = px.line(
+        normalized,
+        x=normalized.index,
+        y=normalized.columns
+    )
 
-st.subheader("🏆 1년 성과 순위")
+    fig.update_traces(connectgaps=True)
 
-rank_df = pd.DataFrame({
-    "종목": final_returns.index,
-    "수익률(%)": final_returns.values.round(2)
-})
+    fig.update_layout(
+        hovermode="x unified",
+        height=650,
+        yaxis_title="시작값 = 100"
+    )
 
-st.dataframe(
-    rank_df,
-    use_container_width=True,
-    hide_index=True
-)
+    st.plotly_chart(
+        fig,
+        use_container_width=True
+    )
 
-if len(final_returns) > 0:
+    st.info(
+        "모든 종목을 시작값 100으로 맞춰 성과를 비교합니다."
+    )
+
+# =====================================================
+# 탭3 수익률 순위
+# =====================================================
+
+with tab3:
+
+    returns = (
+        data.div(data.iloc[0])
+        .subtract(1)
+        .multiply(100)
+    )
+
+    final_returns = (
+        returns.iloc[-1]
+        .sort_values(ascending=False)
+    )
+
+    rank_df = pd.DataFrame({
+        "순위": range(
+            1,
+            len(final_returns)+1
+        ),
+        "종목": final_returns.index,
+        "수익률(%)": final_returns.values.round(2)
+    })
+
+    st.dataframe(
+        rank_df,
+        use_container_width=True,
+        hide_index=True
+    )
+
+    fig = px.bar(
+        rank_df,
+        x="종목",
+        y="수익률(%)",
+        text="수익률(%)"
+    )
+
+    fig.update_layout(
+        height=550
+    )
+
+    st.plotly_chart(
+        fig,
+        use_container_width=True
+    )
 
     best_stock = final_returns.index[0]
     best_return = final_returns.iloc[0]
 
     st.success(
-        f"최근 1년 최고 수익률 종목은 "
-        f"{best_stock} ({best_return:.2f}%) 입니다."
+        f"🏆 최근 1년 최고 수익률 종목: "
+        f"{best_stock} ({best_return:.2f}%)"
     )
 
-# -----------------------
-# 변동성
-# -----------------------
+# =====================================================
+# 탭4 변동성
+# =====================================================
 
-daily_returns = data.pct_change(fill_method=None).dropna()
+with tab4:
 
-volatility = (
-    daily_returns.std()
-    * (252 ** 0.5)
-    * 100
-)
+    daily_returns = (
+        data.pct_change(fill_method=None)
+        .dropna()
+    )
 
-vol_df = pd.DataFrame({
-    "종목": volatility.index,
-    "변동성(%)": volatility.values.round(2)
-})
+    volatility = (
+        daily_returns.std()
+        * (252 ** 0.5)
+        * 100
+    ).sort_values(ascending=False)
 
-st.subheader("⚠️ 연간 변동성")
+    vol_df = pd.DataFrame({
+        "종목": volatility.index,
+        "변동성(%)": volatility.values.round(2)
+    })
 
-fig_vol = px.bar(
-    vol_df,
-    x="종목",
-    y="변동성(%)",
-    text="변동성(%)"
-)
+    st.dataframe(
+        vol_df,
+        use_container_width=True,
+        hide_index=True
+    )
 
-fig_vol.update_layout(
-    height=500
-)
+    fig = px.bar(
+        vol_df,
+        x="종목",
+        y="변동성(%)",
+        text="변동성(%)"
+    )
 
-st.plotly_chart(
-    fig_vol,
-    use_container_width=True
-)
+    fig.update_layout(
+        height=550
+    )
 
-# -----------------------
-# 투자 인사이트
-# -----------------------
+    st.plotly_chart(
+        fig,
+        use_container_width=True
+    )
 
-if len(final_returns) > 0:
-
-    highest_return = final_returns.idxmax()
-    highest_vol = volatility.idxmax()
-    lowest_vol = volatility.idxmin()
-
-    st.subheader("📌 투자 인사이트")
-
-    st.markdown(f"""
-- 최근 1년 최고 수익률 종목: **{highest_return}**
-- 가장 변동성이 큰 종목: **{highest_vol}**
-- 가장 안정적인 종목: **{lowest_vol}**
-- 미국 빅테크와 한국 반도체 기업의 성과를 한눈에 비교할 수 있습니다.
-""")
+    st.info(
+        f"가장 안정적인 종목: {volatility.idxmin()} | "
+        f"가장 변동성이 큰 종목: {volatility.idxmax()}"
+    )
